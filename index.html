@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blue.ai - Жерсеріктік деректер мониторингі</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        blue: {
+                            light: '#00B4D8',
+                            DEFAULT: '#0077B6',
+                            dark: '#023E8A'
+                        },
+                        alert: '#E63946',
+                        success: '#2A9D8F',
+                        dark: '#1D3557',
+                        light: '#F1FAEE'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Orbitron', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .dark .glass-panel {
+            background: rgba(29, 53, 87, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #00B4D8 0%, #0077B6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .marker-confirmed {
+            animation: bounce 2s infinite;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .nav-item {
+            position: relative;
+        }
+        .nav-item::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 2px;
+            bottom: -4px;
+            left: 0;
+            background: #00B4D8;
+            transition: width 0.3s;
+        }
+        .nav-item:hover::after {
+            width: 100%;
+        }
+        .stat-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 119, 182, 0.2);
+        }
+        .anomaly-row {
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .anomaly-row:hover {
+            background: rgba(0, 180, 216, 0.1);
+            transform: translateX(5px);
+        }
+        #map { height: 600px; width: 100%; border-radius: 12px; }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-dark text-gray-800 dark:text-light transition-colors duration-300">
+
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 glass-panel shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-blue-light to-blue rounded-lg flex items-center justify-center">
+                        <i class="fas fa-satellite text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <span class="font-display text-2xl font-bold gradient-text">Blue.ai</span>
+                        <p class="text-xs text-gray-500 dark:text-gray-400" data-i18n="tagline">Жерсеріктік деректер мониторингі</p>
+                    </div>
+                </div>
+                
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#dashboard" class="nav-item text-sm font-semibold hover:text-blue transition" data-i18n="nav_dashboard">Бақылау тақтасы</a>
+                    <a href="#case-study" class="nav-item text-sm font-semibold hover:text-blue transition" data-i18n="nav_case">Ақтау оқиғасы</a>
+                    <a href="#statistics" class="nav-item text-sm font-semibold hover:text-blue transition" data-i18n="nav_stats">Статистика</a>
+                    <a href="#technology" class="nav-item text-sm font-semibold hover:text-blue transition" data-i18n="nav_tech">Технология</a>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <!-- Language Switcher: KZ → RU → EN -->
+                    <div class="flex bg-gray-200 dark:bg-gray-700 rounded-lg p-1">
+                        <button onclick="setLanguage('kz')" class="language-btn px-3 py-1 rounded-md text-xs font-bold bg-white dark:bg-gray-600 shadow-sm" id="btn-kz">KZ</button>
+                        <button onclick="setLanguage('ru')" class="language-btn px-3 py-1 rounded-md text-xs font-bold text-gray-600 dark:text-gray-300" id="btn-ru">RU</button>
+                        <button onclick="setLanguage('en')" class="language-btn px-3 py-1 rounded-md text-xs font-bold text-gray-600 dark:text-gray-300" id="btn-en">EN</button>
+                    </div>
+                    
+                    <button onclick="toggleTheme()" class="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                        <i class="fas fa-moon dark:hidden"></i>
+                        <i class="fas fa-sun hidden dark:block text-yellow-400"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="pt-24 pb-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-blue-dark to-dark text-white">
+        <div class="max-w-7xl mx-auto text-center">
+            <div class="inline-flex items-center px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 mb-6">
+                <span class="w-2 h-2 bg-success rounded-full mr-2 animate-pulse"></span>
+                <span class="text-sm font-medium" data-i18n="status_active">Жүйе белсенді • 9 жыл мониторинг</span>
+            </div>
+            <h1 class="font-display text-4xl md:text-6xl font-bold mb-6 leading-tight">
+                Blue.ai
+            </h1>
+            <p class="text-xl text-blue-light font-semibold mb-4" data-i18n="hero_subtitle">Жерсеріктік деректер мониторингі</p>
+            <p class="text-lg text-gray-300 max-w-3xl mx-auto mb-8" data-i18n="hero_desc">
+                Қазақстанның шөлді аймақтарындағы су ресурстарын автоматты бақылау жүйесі. 
+                Sentinel-1/2 спутниктері мен AI технологиясы негізінде.
+            </p>
+            <div class="flex flex-wrap justify-center gap-4">
+                <button onclick="scrollToSection('dashboard')" class="px-8 py-3 bg-blue-light hover:bg-blue text-white rounded-lg font-semibold transition transform hover:scale-105 shadow-lg shadow-blue/30">
+                    <i class="fas fa-map-marked-alt mr-2"></i>
+                    <span data-i18n="btn_view_map">Картаны қарау</span>
+                </button>
+                <button onclick="exportToCSV()" class="px-8 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg font-semibold transition">
+                    <i class="fas fa-download mr-2"></i>
+                    <span data-i18n="btn_export">CSV экспорт</span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Section -->
+    <section id="dashboard" class="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-dark">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
+                <div>
+                    <h2 class="text-3xl font-bold text-dark dark:text-light mb-2" data-i18n="map_title">Аномалиялар картасы</h2>
+                    <p class="text-gray-600 dark:text-gray-400" data-i18n="map_subtitle">19 анықталған оқиға • 3 аймақ • 2015-2024</p>
+                </div>
+                
+                <div class="flex flex-wrap gap-3 mt-4 md:mt-0">
+                    <select id="regionFilter" onchange="filterMap()" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue">
+                        <option value="all" data-i18n="filter_all">Барлық аймақтар</option>
+                        <option value="Актау">Актау</option>
+                        <option value="Кызылорда">Қызылорда</option>
+                        <option value="Жанаозен">Жаңаөзен</option>
+                    </select>
+                    <select id="priorityFilter" onchange="filterMap()" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue">
+                        <option value="all" data-i18n="filter_priority">Барлық приоритеттер</option>
+                        <option value="high" data-i18n="filter_high">Жоғары</option>
+                        <option value="medium" data-i18n="filter_medium">Орташа</option>
+                        <option value="low" data-i18n="filter_low">Төмен</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2">
+                    <div class="glass-panel rounded-2xl shadow-xl p-4">
+                        <div id="map"></div>
+                        <div class="mt-4 flex flex-wrap gap-4 text-sm">
+                            <div class="flex items-center">
+                                <span class="w-3 h-3 rounded-full bg-alert mr-2"></span>
+                                <span data-i18n="legend_confirmed">БАҚ растады</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="w-3 h-3 rounded-full bg-orange-500 mr-2"></span>
+                                <span data-i18n="legend_high">Жоғары приоритет</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
+                                <span data-i18n="legend_medium">Орташа приоритет</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="w-3 h-3 rounded-full bg-blue-400 mr-2"></span>
+                                <span data-i18n="legend_low">Төмен приоритет</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-2xl shadow-xl p-6 max-h-[600px] overflow-y-auto">
+                    <h3 class="text-lg font-bold mb-4 flex items-center">
+                        <i class="fas fa-list-ul mr-2 text-blue"></i>
+                        <span data-i18n="list_title">Приоритетті тізім</span>
+                    </h3>
+                    <div id="anomaliesList" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Case Study Section -->
+    <section id="case-study" class="py-16 px-4 sm:px-6 lg:px-8 bg-white dark:bg-gray-900">
+        <div class="max-w-7xl mx-auto">
+            <div class="text-center mb-12">
+                <span class="inline-block px-4 py-1 rounded-full bg-success/10 text-success font-semibold text-sm mb-4" data-i18n="case_badge">РАСТАЛҒАН ОҚИҒА</span>
+                <h2 class="text-3xl md:text-4xl font-bold mb-4">Ақтау • 15 маусым 2024</h2>
+                <p class="text-gray-600 dark:text-gray-400 max-w-3xl mx-auto" data-i18n="case_subtitle">
+                    Аномалия деректерде маусым 2024 (айлық орташа) үшін тіркелген, бұл 15 маусым 2024 жылғы расталған апат уақытына сәйкес келеді. 
+                    Жүйе Ақтаудың 11-микрорайонындағы магистральдық су құбыры жарылған кезеңде гидрологиялық индекстердің критикалық ауытқуын анықтады.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+                <!-- Photo Evidence -->
+                <div class="glass-panel rounded-2xl overflow-hidden shadow-xl">
+                    <div class="relative h-80 w-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                        <!-- Фото вставляется здесь -->
+                        <div class="relative h-64 w-full">
+                            <img src="aktau06.png" alt="Авария в Актау 15 июня 2024" class="w-full h-full object-cover">
+                            <div class="absolute top-4 right-4 bg-alert text-white px-3 py-1 rounded-full text-sm font-bold">
+                                <i class="fas fa-check-circle mr-1"></i> ПОДТВЕРЖДЕНО СМИ
+                            </div>
+                        </div>
+                        <div class="absolute top-4 right-4 bg-alert text-white px-3 py-1 rounded-full text-sm font-bold">
+                            <i class="fas fa-check-circle mr-1"></i> <span data-i18n="confirmed_badge">БАҚ РАСТАДЫ</span>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <h3 class="font-bold text-lg mb-4" data-i18n="incident_details">Оқиға мәліметтері</h3>
+                        <ul class="space-y-3 text-sm">
+                            <li class="flex justify-between border-b pb-2">
+                                <span class="text-gray-600" data-i18n="label_coords">Координаттар:</span> 
+                                <span class="font-mono">43.64°N, 51.20°E</span>
+                            </li>
+                            <li class="flex justify-between border-b pb-2">
+                                <span class="text-gray-600" data-i18n="label_district">Аймақ:</span> 
+                                <span>11-микрорайон</span>
+                            </li>
+                            <li class="flex justify-between border-b pb-2">
+                                <span class="text-gray-600" data-i18n="label_impact">Салдары:</span> 
+                                <span>35-40 үй сусыз қалды</span>
+                            </li>
+                            <li class="flex justify-between border-b pb-2">
+                                <span class="text-gray-600" data-i18n="label_source">Растау:</span> 
+                                <span class="text-success">lada.kz</span>
+                            </li>
+                            <li class="flex justify-between">
+                                <span class="text-gray-600" data-i18n="label_detection">Анықтау:</span> 
+                                <span class="font-mono text-xs">Маусым 2024 айлық деректері</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Physics Explanation -->
+                <div class="glass-panel rounded-2xl p-6 shadow-xl bg-gradient-to-br from-blue-dark to-dark text-white">
+                    <h3 class="font-bold text-lg mb-4 flex items-center">
+                        <i class="fas fa-atom mr-2 text-blue-light"></i>
+                        <span data-i18n="physics_title">Анықтау физикасы</span>
+                    </h3>
+                    <div class="space-y-4">
+                        <div class="flex items-start space-x-3">
+                            <div class="w-8 h-8 rounded-full bg-alert/20 flex items-center justify-center flex-shrink-0 mt-1">
+                                <i class="fas fa-satellite text-alert text-sm"></i>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-sm" data-i18n="sat_data">Спутниктік деректер</p>
+                                <p class="text-xs text-gray-300">Sentinel-1/2: топырақ ылғалдылығының артуы (NDWI↑) және радарлық көрініс (VH/VV↑)</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-center text-2xl text-blue-light">
+                            <i class="fas fa-plus"></i>
+                        </div>
+                        <div class="flex items-start space-x-3">
+                            <div class="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center flex-shrink-0 mt-1">
+                                <i class="fas fa-cloud-sun text-yellow-500 text-sm"></i>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-sm">ERA5</p>
+                                <p class="text-xs text-gray-300">Жауын-шашын жоқ + жоғарғы булану + құрғақшылық стресс</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-center text-2xl text-blue-light">
+                            <i class="fas fa-equals"></i>
+                        </div>
+                        <div class="bg-white/10 rounded-lg p-4 border border-success/30">
+                            <p class="text-sm font-bold text-success mb-1" data-i18n="contradiction">ҚАЙШЫЛЫҚ АНЫҚТАЛДЫ</p>
+                            <p class="text-xs">Жауын-шашынсыз шөлде ылғал пайда болуы мүмкін емес. Бұл техникалық апат.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time Series Charts -->
+            <div class="glass-panel rounded-2xl shadow-xl p-6">
+                <h3 class="text-xl font-bold mb-6" data-i18n="evolution_title">Индекстер эволюциясы (Наурыз-Қыркүйек 2024)</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="chart-container">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="opticalChart"></canvas>
+                    </div>
+                </div>
+                <div class="mt-6 p-4 bg-blue/5 rounded-lg border border-blue/20">
+                    <p class="text-sm text-center text-gray-600 dark:text-gray-400">
+                        <i class="fas fa-info-circle text-blue mr-2"></i>
+                        <span data-i18n="chart_note">Тік сызық — 15 маусым апат күні. Айлық орташа деректердегі аномалия.</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Statistics Section -->
+    <section id="statistics" class="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-dark">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-3xl font-bold text-center mb-12" data-i18n="stats_title">Жүйе көрсеткіштері</h2>
+            
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-12">
+                <div class="stat-card glass-panel rounded-2xl p-6 text-center shadow-lg">
+                    <div class="text-4xl font-bold text-blue mb-2">75,100</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400" data-i18n="stat_area">км² мониторинг</div>
+                </div>
+                <div class="stat-card glass-panel rounded-2xl p-6 text-center shadow-lg">
+                    <div class="text-4xl font-bold text-blue mb-2">9</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400" data-i18n="stat_years">жыл бақылау</div>
+                </div>
+                <div class="stat-card glass-panel rounded-2xl p-6 text-center shadow-lg">
+                    <div class="text-4xl font-bold text-alert mb-2">19</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400" data-i18n="stat_anomalies">аномалия табылды</div>
+                </div>
+                <div class="stat-card glass-panel rounded-2xl p-6 text-center shadow-lg">
+                    <div class="text-4xl font-bold text-success mb-2">1</div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400" data-i18n="stat_confirmed">расталған</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="glass-panel rounded-2xl shadow-xl p-6">
+                    <h3 class="text-lg font-bold mb-4" data-i18n="region_dist">Аймақтар бойынша бөлініс</h3>
+                    <div class="chart-container" style="height: 250px;">
+                        <canvas id="regionChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-2xl shadow-xl p-6">
+                    <h3 class="text-lg font-bold mb-4" data-i18n="yearly_trend">Жылдық динамика</h3>
+                    <div class="chart-container" style="height: 250px;">
+                        <canvas id="yearChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detection Time Info -->
+            <div class="mt-8 glass-panel rounded-2xl shadow-xl p-8">
+                <h3 class="text-xl font-bold mb-6 text-center" data-i18n="detection_time_title">Анықтау уақыты</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="text-center p-4 bg-blue/5 rounded-lg">
+                        <div class="text-3xl font-bold text-blue mb-2">7-15</div>
+                        <div class="text-sm text-gray-600" data-i18n="time_theoretical">Теориялық минимум (күн)</div>
+                        <div class="text-xs text-gray-400 mt-1">Sentinel-1 орбиталық циклі</div>
+                    </div>
+                    <div class="text-center p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                        <div class="text-3xl font-bold text-orange-600 mb-2">10-20</div>
+                        <div class="text-sm text-gray-600" data-i18n="time_real">Нақты практика (күн)</div>
+                        <div class="text-xs text-gray-400 mt-1">Бұлттылық + деректерді өңдеу</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                        <div class="text-3xl font-bold text-gray-600 mb-2">1-12</div>
+                        <div class="text-sm text-gray-600" data-i18n="time_comparison">Айлар (басқа әдістер)</div>
+                        <div class="text-xs text-gray-400 mt-1">Көрнекі тексеру</div>
+                    </div>
+                </div>
+                <p class="text-center text-sm text-gray-500 mt-6" data-i18n="time_note">
+                    Біздің артықшылығымыз — жылдамдық емес, толық қамту мен объективтілік
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technology Section -->
+    <section id="technology" class="py-16 px-4 sm:px-6 lg:px-8 bg-white dark:bg-gray-900">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-3xl font-bold text-center mb-12" data-i18n="tech_title">Технологиялық схема</h2>
+            
+            <div class="relative hidden md:block mb-12">
+                <div class="absolute top-1/2 left-0 right-0 h-1 bg-gradient-to-r from-blue-400 via-blue to-success -z-10 transform -translate-y-1/2"></div>
+                
+                <div class="flex justify-between">
+                    <div class="text-center w-1/5">
+                        <div class="w-16 h-16 mx-auto bg-blue-500 rounded-full flex items-center justify-center text-white text-2xl mb-2 shadow-lg">
+                            <i class="fas fa-satellite"></i>
+                        </div>
+                        <p class="text-sm font-semibold">Sentinel-1/2</p>
+                        <p class="text-xs text-gray-500">6-12 күн цикл</p>
+                    </div>
+                    
+                    <div class="text-center w-1/5">
+                        <div class="w-16 h-16 mx-auto bg-blue rounded-full flex items-center justify-center text-white text-2xl mb-2 shadow-lg">
+                            <i class="fas fa-cloud"></i>
+                        </div>
+                        <p class="text-sm font-semibold">Google Earth Engine</p>
+                        <p class="text-xs text-gray-500">Бұлттық өңдеу</p>
+                    </div>
+                    
+                    <div class="text-center w-1/5">
+                        <div class="w-16 h-16 mx-auto bg-purple-600 rounded-full flex items-center justify-center text-white text-2xl mb-2 shadow-lg">
+                            <i class="fas fa-brain"></i>
+                        </div>
+                        <p class="text-sm font-semibold">ML</p>
+                        <p class="text-xs text-gray-500">Random Forest + LSTM</p>
+                    </div>
+                    
+                    <div class="text-center w-1/5">
+                        <div class="w-16 h-16 mx-auto bg-orange-500 rounded-full flex items-center justify-center text-white text-2xl mb-2 shadow-lg">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <p class="text-sm font-semibold">Анықтау</p>
+                        <p class="text-xs text-gray-500">Аномалия + Приоритет</p>
+                    </div>
+                    
+                    <div class="text-center w-1/5">
+                        <div class="w-16 h-16 mx-auto bg-success rounded-full flex items-center justify-center text-white text-2xl mb-2 shadow-lg">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <p class="text-sm font-semibold">Бригадалар</p>
+                        <p class="text-xs text-gray-500">Жергілікті тексеру</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="glass-panel rounded-xl p-6 text-center hover:shadow-xl transition">
+                    <i class="fas fa-globe text-3xl text-blue mb-3"></i>
+                    <h4 class="font-bold mb-2" data-i18n="feat_coverage">Толық қамту</h4>
+                    <p class="text-sm text-gray-600">75,000+ км² бір уақытта</p>
+                </div>
+                <div class="glass-panel rounded-xl p-6 text-center hover:shadow-xl transition">
+                    <i class="fas fa-robot text-3xl text-purple-600 mb-3"></i>
+                    <h4 class="font-bold mb-2" data-i18n="feat_auto">Автоматизация</h4>
+                    <p class="text-sm text-gray-600">Адам қатысуынсыз мониторинг</p>
+                </div>
+                <div class="glass-panel rounded-xl p-6 text-center hover:shadow-xl transition">
+                    <i class="fas fa-history text-3xl text-success mb-3"></i>
+                    <h4 class="font-bold mb-2" data-i18n="feat_archive">Архивтер</h4>
+                    <p class="text-sm text-gray-600">9 жыл тарихи деректер</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-12 px-4">
+        <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div>
+                <div class="flex items-center space-x-2 mb-4">
+                    <i class="fas fa-satellite text-blue-light text-2xl"></i>
+                    <span class="font-display text-xl font-bold">Blue.ai</span>
+                </div>
+                <p class="text-sm text-gray-400">Жерсеріктік деректер мониторингі</p>
+            </div>
+            <div>
+                <h4 class="font-bold mb-4" data-i18n="footer_regions">Аймақтар</h4>
+                <ul class="space-y-2 text-sm text-gray-400">
+                    <li>Актау</li>
+                    <li>Қызылорда</li>
+                    <li>Жаңаөзен</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-bold mb-4" data-i18n="footer_tech">Технологиялар</h4>
+                <ul class="space-y-2 text-sm text-gray-400">
+                    <li>Sentinel-1/2</li>
+                    <li>Google Earth Engine</li>
+                    <li>Machine Learning</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-bold mb-4" data-i18n="footer_contacts">Байланыс</h4>
+                <p class="text-sm text-gray-400">Blue.ai Team</p>
+                <p class="text-sm text-gray-400">Қазақстан</p>
+            </div>
+        </div>
+        <div class="max-w-7xl mx-auto mt-8 pt-8 border-t border-gray-700 text-center text-sm text-gray-500">
+            © 2024 Blue.ai
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Data
+        const anomalies = [
+            { id: 0, region: "Қызылорда", date: "2016-09-01", indicator: -4.59, priority: "low", coords: [44.848, 65.503], confirmed: false },
+            { id: 1, region: "Актау", date: "2020-10-01", indicator: 0.18, priority: "low", coords: [43.64, 51.20], confirmed: false },
+            { id: 2, region: "Актау", date: "2018-09-01", indicator: 0.57, priority: "medium", coords: [43.65, 51.18], confirmed: false },
+            { id: 3, region: "Актау", date: "2024-11-01", indicator: 2.02, priority: "high", coords: [43.62, 51.22], confirmed: false },
+            { id: 4, region: "Жаңаөзен", date: "2024-11-01", indicator: 3.00, priority: "high", coords: [43.341, 52.862], confirmed: false },
+            { id: 5, region: "Актау", date: "2023-09-01", indicator: -3.83, priority: "low", coords: [43.66, 51.15], confirmed: false },
+            { id: 6, region: "Актау", date: "2024-06-01", indicator: 2.87, priority: "high", coords: [43.64, 51.20], confirmed: true },
+            { id: 7, region: "Актау", date: "2018-06-01", indicator: -1.25, priority: "low", coords: [43.63, 51.25], confirmed: false },
+            { id: 8, region: "Жаңаөзен", date: "2019-07-01", indicator: -4.20, priority: "low", coords: [43.335, 52.855], confirmed: false },
+            { id: 9, region: "Жаңаөзен", date: "2018-06-01", indicator: -1.96, priority: "low", coords: [43.338, 52.868], confirmed: false },
+            { id: 10, region: "Жаңаөзен", date: "2018-09-01", indicator: 0.40, priority: "low", coords: [43.345, 52.845], confirmed: false },
+            { id: 11, region: "Актау", date: "2022-06-01", indicator: 0.32, priority: "low", coords: [43.655, 51.19], confirmed: false },
+            { id: 12, region: "Актау", date: "2022-11-01", indicator: 1.79, priority: "medium", coords: [43.638, 51.21], confirmed: false },
+            { id: 13, region: "Жаңаөзен", date: "2022-11-01", indicator: 0.68, priority: "medium", coords: [43.342, 52.858], confirmed: false },
+            { id: 14, region: "Актау", date: "2019-07-01", indicator: -3.33, priority: "low", coords: [43.645, 51.17], confirmed: false },
+            { id: 15, region: "Қызылорда", date: "2024-06-01", indicator: 2.64, priority: "high", coords: [44.852, 65.498], confirmed: false },
+            { id: 16, region: "Жаңаөзен", date: "2020-08-01", indicator: -3.84, priority: "low", coords: [43.339, 52.860], confirmed: false },
+            { id: 17, region: "Жаңаөзен", date: "2018-11-01", indicator: 2.80, priority: "high", coords: [43.344, 52.865], confirmed: false },
+            { id: 18, region: "Актау", date: "2020-08-01", indicator: -3.64, priority: "low", coords: [43.642, 51.205], confirmed: false }
+        ];
+
+        // Translations (KZ → RU → EN)
+        const translations = {
+            kz: {
+                tagline: "Жерсеріктік деректер мониторингі",
+                nav_dashboard: "Бақылау тақтасы", nav_case: "Ақтау оқиғасы", nav_stats: "Статистика", nav_tech: "Технология",
+                status_active: "Жүйе белсенді • 9 жыл мониторинг",
+                hero_subtitle: "Жерсеріктік деректер мониторингі",
+                hero_desc: "Қазақстанның шөлді аймақтарындағы су ресурстарын автоматты бақылау жүйесі. Sentinel-1/2 спутниктері мен AI технологиясы негізінде.",
+                btn_view_map: "Картаны қарау", btn_export: "CSV экспорт",
+                map_title: "Аномалиялар картасы", map_subtitle: "19 анықталған оқиға • 3 аймақ • 2015-2024",
+                filter_all: "Барлық аймақтар", filter_priority: "Барлық приоритеттер",
+                filter_high: "Жоғары", filter_medium: "Орташа", filter_low: "Төмен",
+                legend_confirmed: "БАҚ растады", legend_high: "Жоғары приоритет",
+                legend_medium: "Орташа приоритет", legend_low: "Төмен приоритет",
+                list_title: "Приоритетті тізім",
+                case_badge: "РАСТАЛҒАН ОҚИҒА",
+                case_subtitle: "Аномалия деректерде маусым 2024 (айлық орташа) үшін тіркелген, бұл 15 маусым 2024 жылғы расталған апат уақытына сәйкес келеді. Жүйе Ақтаудың 11-микрорайонындағы магистральдық су құбыры жарылған кезеңде гидрологиялық индекстердің критикалық ауытқуын анықтады.",
+                confirmed_badge: "БАҚ РАСТАДЫ",
+                incident_details: "Оқиға мәліметтері",
+                label_coords: "Координаттар:", label_district: "Аймақ:", label_impact: "Салдары:",
+                label_source: "Растау:", label_detection: "Анықтау:",
+                physics_title: "Анықтау физикасы",
+                sat_data: "Спутниктік деректер",
+                contradiction: "ҚАЙШЫЛЫҚ АНЫҚТАЛДЫ",
+                evolution_title: "Индекстер эволюциясы (Наурыз-Қыркүйек 2024)",
+                chart_note: "Тік сызық — 15 маусым апат күні. Айлық орташа деректердегі аномалия.",
+                stats_title: "Жүйе көрсеткіштері",
+                stat_area: "км² мониторинг", stat_years: "жыл бақылау",
+                stat_anomalies: "аномалия табылды", stat_confirmed: "расталған",
+                region_dist: "Аймақтар бойынша бөлініс", yearly_trend: "Жылдық динамика",
+                detection_time_title: "Анықтау уақыты",
+                time_theoretical: "Теориялық минимум (күн)",
+                time_real: "Нақты практика (күн)",
+                time_comparison: "Айлар (басқа әдістер)",
+                time_note: "Біздің артықшылығымыз — жылдамдық емес, толық қамту мен объективтілік",
+                tech_title: "Технологиялық схема",
+                feat_coverage: "Толық қамту", feat_auto: "Автоматизация", feat_archive: "Архивтер",
+                footer_regions: "Аймақтар", footer_tech: "Технологиялар", footer_contacts: "Байланыс"
+            },
+            ru: {
+                tagline: "Спутниковый мониторинг данных",
+                nav_dashboard: "Дашборд", nav_case: "Кейс Актау", nav_stats: "Статистика", nav_tech: "Технология",
+                status_active: "Система активна • 9 лет мониторинга",
+                hero_subtitle: "Спутниковый мониторинг данных",
+                hero_desc: "Система автоматического контроля водных ресурсов в засушливых регионах Казахстана. На основе спутников Sentinel-1/2 и технологий AI.",
+                btn_view_map: "Смотреть карту", btn_export: "Экспорт CSV",
+                map_title: "Карта аномалий", map_subtitle: "19 обнаруженных случаев • 3 региона • 2015-2024",
+                filter_all: "Все регионы", filter_priority: "Все приоритеты",
+                filter_high: "Высокий", filter_medium: "Средний", filter_low: "Низкий",
+                legend_confirmed: "Подтверждено СМИ", legend_high: "Высокий приоритет",
+                legend_medium: "Средний приоритет", legend_low: "Низкий приоритет",
+                list_title: "Приоритетный список",
+                case_badge: "ПОДТВЕРЖДЕННЫЙ КЕЙС",
+                case_subtitle: "Аномалия зафиксирована в данных за июнь 2024 (месячное среднее), что совпадает по времени с подтверждённой аварией 15 июня 2024. Система обнаружила критическое отклонение гидрологических индексов в период, когда произошёл прорыв магистрального водопровода в 11-м микрорайоне Актау.",
+                confirmed_badge: "ПОДТВЕРЖДЕНО",
+                incident_details: "Детали инцидента",
+                label_coords: "Координаты:", label_district: "Район:", label_impact: "Последствия:",
+                label_source: "Подтверждение:", label_detection: "Обнаружение:",
+                physics_title: "Физика обнаружения",
+                sat_data: "Спутниковые данные",
+                contradiction: "ПРОТИВОРЕЧИЕ ОБНАРУЖЕНО",
+                evolution_title: "Эволюция индексов (Март-Сентябрь 2024)",
+                chart_note: "Вертикальная линия — дата аварии 15 июня. Аномалия в месячных средних данных.",
+                stats_title: "Метрики системы",
+                stat_area: "км² мониторинга", stat_years: "лет наблюдений",
+                stat_anomalies: "аномалий найдено", stat_confirmed: "подтверждено",
+                region_dist: "Распределение по регионам", yearly_trend: "Динамика по годам",
+                detection_time_title: "Время детекции",
+                time_theoretical: "Теоретический минимум (дней)",
+                time_real: "Реальная практика (дней)",
+                time_comparison: "Месяцы (другие методы)",
+                time_note: "Наше преимущество — не скорость, а полное покрытие и объективность",
+                tech_title: "Технологическая схема",
+                feat_coverage: "Полное покрытие", feat_auto: "Автоматизация", feat_archive: "Архивы",
+                footer_regions: "Регионы", footer_tech: "Технологии", footer_contacts: "Контакты"
+            },
+            en: {
+                tagline: "Satellite Data Monitoring",
+                nav_dashboard: "Dashboard", nav_case: "Aktau Case", nav_stats: "Statistics", nav_tech: "Technology",
+                status_active: "System Active • 9 Years Monitoring",
+                hero_subtitle: "Satellite Data Monitoring",
+                hero_desc: "Automated water resource monitoring system in Kazakhstan's arid regions. Based on Sentinel-1/2 satellites and AI technology.",
+                btn_view_map: "View Map", btn_export: "Export CSV",
+                map_title: "Anomaly Map", map_subtitle: "19 detected cases • 3 regions • 2015-2024",
+                filter_all: "All Regions", filter_priority: "All Priorities",
+                filter_high: "High", filter_medium: "Medium", filter_low: "Low",
+                legend_confirmed: "Media Confirmed", legend_high: "High Priority",
+                legend_medium: "Medium Priority", legend_low: "Low Priority",
+                list_title: "Priority List",
+                case_badge: "CONFIRMED CASE",
+                case_subtitle: "Anomaly recorded in June 2024 data (monthly average), coinciding with the confirmed accident on June 15, 2024. The system detected critical deviation of hydrological indices during the period when the main water pipeline ruptured in Aktau's 11th microdistrict.",
+                confirmed_badge: "CONFIRMED",
+                incident_details: "Incident Details",
+                label_coords: "Coordinates:", label_district: "District:", label_impact: "Impact:",
+                label_source: "Confirmation:", label_detection: "Detection:",
+                physics_title: "Detection Physics",
+                sat_data: "Satellite Data",
+                contradiction: "CONTRADICTION DETECTED",
+                evolution_title: "Index Evolution (March-September 2024)",
+                chart_note: "Vertical line — June 15 accident date. Anomaly in monthly averaged data.",
+                stats_title: "System Metrics",
+                stat_area: "km² monitored", stat_years: "years of observation",
+                stat_anomalies: "anomalies found", stat_confirmed: "confirmed",
+                region_dist: "Regional Distribution", yearly_trend: "Yearly Trend",
+                detection_time_title: "Detection Time",
+                time_theoretical: "Theoretical minimum (days)",
+                time_real: "Real practice (days)",
+                time_comparison: "Months (other methods)",
+                time_note: "Our advantage is not speed, but full coverage and objectivity",
+                tech_title: "Technology Pipeline",
+                feat_coverage: "Full Coverage", feat_auto: "Automation", feat_archive: "Archives",
+                footer_regions: "Regions", footer_tech: "Technologies", footer_contacts: "Contacts"
+            }
+        };
+
+        let currentLang = 'kz';
+        let map;
+        let markers = [];
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            renderAnomaliesList();
+            initCharts();
+            setLanguage('kz');
+        });
+
+        function initMap() {
+            map = L.map('map').setView([44.0, 55.0], 6);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            anomalies.forEach(anomaly => {
+                const color = anomaly.confirmed ? '#E63946' : 
+                             anomaly.priority === 'high' ? '#F97316' :
+                             anomaly.priority === 'medium' ? '#EAB308' : '#60A5FA';
+                
+                const size = anomaly.confirmed ? 20 : 
+                            anomaly.priority === 'high' ? 14 :
+                            anomaly.priority === 'medium' ? 12 : 10;
+
+                const marker = L.circleMarker(anomaly.coords, {
+                    radius: size,
+                    fillColor: color,
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.9,
+                    className: anomaly.confirmed ? 'marker-confirmed' : ''
+                }).addTo(map);
+
+                const popupContent = `
+                    <div class="p-4 min-w-[250px]">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-lg">${anomaly.region}</h3>
+                            ${anomaly.confirmed ? '<span class="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">✓ Confirmed</span>' : ''}
+                        </div>
+                        <p class="text-sm text-gray-600 mb-2">${anomaly.date}</p>
+                        <div class="space-y-1 text-sm">
+                            <div class="flex justify-between"><span>Indicator:</span> <span class="font-mono font-bold">${anomaly.indicator.toFixed(2)}</span></div>
+                            <div class="flex justify-between"><span>Priority:</span> <span class="capitalize">${anomaly.priority}</span></div>
+                            <div class="flex justify-between"><span>Coords:</span> <span class="font-mono text-xs">${anomaly.coords[0].toFixed(2)}, ${anomaly.coords[1].toFixed(2)}</span></div>
+                        </div>
+                        ${anomaly.confirmed ? '<div class="mt-3 p-2 bg-red-50 rounded text-xs text-red-700">Pipeline rupture, 35-40 houses affected</div>' : ''}
+                    </div>
+                `;
+
+                marker.bindPopup(popupContent);
+                markers.push({marker, anomaly});
+            });
+        }
+
+        function renderAnomaliesList() {
+            const container = document.getElementById('anomaliesList');
+            const sorted = [...anomalies].sort((a, b) => b.indicator - a.indicator);
+            
+            container.innerHTML = sorted.map(a => `
+                <div class="anomaly-row p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex justify-between items-center" onclick="focusOnAnomaly(${a.id})">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full ${a.confirmed ? 'bg-alert' : a.priority === 'high' ? 'bg-orange-500' : a.priority === 'medium' ? 'bg-yellow-500' : 'bg-blue-400'}"></span>
+                            <span class="font-semibold text-sm">${a.region}</span>
+                            ${a.confirmed ? '<i class="fas fa-check-circle text-alert text-xs"></i>' : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">${a.date}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-bold text-sm ${a.indicator > 0 ? 'text-orange-600' : 'text-blue-600'}">${a.indicator > 0 ? '+' : ''}${a.indicator.toFixed(2)}</div>
+                        <div class="text-xs text-gray-500 capitalize">${a.priority}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function focusOnAnomaly(id) {
+            const anomaly = anomalies.find(a => a.id === id);
+            if (anomaly) {
+                map.setView(anomaly.coords, 13);
+                markers.find(m => m.anomaly.id === id).marker.openPopup();
+            }
+        }
+
+        function filterMap() {
+            const region = document.getElementById('regionFilter').value;
+            const priority = document.getElementById('priorityFilter').value;
+            
+            markers.forEach(({marker, anomaly}) => {
+                let visible = true;
+                if (region !== 'all' && anomaly.region !== region) visible = false;
+                if (priority !== 'all' && anomaly.priority !== priority) visible = false;
+                
+                if (visible) marker.addTo(map);
+                else marker.remove();
+            });
+        }
+
+        function initCharts() {
+            const ctx1 = document.getElementById('radarChart').getContext('2d');
+            new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+                    datasets: [{
+                        label: 'VH (dB)',
+                        data: [-20, -19.5, -18, -12, -11, -13, -19],
+                        borderColor: '#00B4D8',
+                        backgroundColor: 'rgba(0, 180, 216, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'VV (dB)',
+                        data: [-15, -14.8, -14, -10, -9.5, -11, -14.5],
+                        borderColor: '#0077B6',
+                        backgroundColor: 'rgba(0, 119, 182, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        annotation: {
+                            annotations: {
+                                line1: {
+                                    type: 'line',
+                                    xMin: 3,
+                                    xMax: 3,
+                                    borderColor: '#E63946',
+                                    borderWidth: 2
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const ctx2 = document.getElementById('opticalChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
+                    datasets: [{
+                        label: 'NDWI',
+                        data: [-0.3, -0.2, 0.1, 0.45, 0.42, 0.3, -0.1],
+                        borderColor: '#2A9D8F',
+                        backgroundColor: 'rgba(42, 157, 143, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'Rainfall (mm)',
+                        data: [5, 8, 12, 0, 0, 2, 4],
+                        borderColor: '#E63946',
+                        borderDash: [5, 5],
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+
+            const ctx3 = document.getElementById('regionChart').getContext('2d');
+            new Chart(ctx3, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Актау', 'Жаңаөзен', 'Қызылорда'],
+                    datasets: [{
+                        data: [10, 7, 2],
+                        backgroundColor: ['#00B4D8', '#0077B6', '#023E8A']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+
+            const ctx4 = document.getElementById('yearChart').getContext('2d');
+            new Chart(ctx4, {
+                type: 'bar',
+                data: {
+                    labels: ['2016', '2018', '2019', '2020', '2022', '2023', '2024'],
+                    datasets: [{
+                        label: 'Anomalies',
+                        data: [1, 4, 2, 2, 2, 1, 7],
+                        backgroundColor: '#00B4D8'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+                }
+            });
+        }
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            
+            ['kz', 'ru', 'en'].forEach(l => {
+                const btn = document.getElementById(`btn-${l}`);
+                if (l === lang) {
+                    btn.classList.remove('text-gray-600', 'dark:text-gray-300');
+                    btn.classList.add('bg-white', 'dark:bg-gray-600', 'shadow-sm');
+                } else {
+                    btn.classList.add('text-gray-600', 'dark:text-gray-300');
+                    btn.classList.remove('bg-white', 'dark:bg-gray-600', 'shadow-sm');
+                }
+            });
+
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[lang][key]) {
+                    el.textContent = translations[lang][key];
+                }
+            });
+
+            document.documentElement.lang = lang;
+        }
+
+        function toggleTheme() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        function scrollToSection(id) {
+            document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function exportToCSV() {
+            const headers = ['ID', 'Region', 'Date', 'Latitude', 'Longitude', 'Leakage_Indicator', 'Priority', 'Confirmed'];
+            const rows = anomalies.map(a => [
+                a.id, a.region, a.date, a.coords[0], a.coords[1], 
+                a.indicator, a.priority, a.confirmed ? 'Yes' : 'No'
+            ]);
+            
+            const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'blueai_anomalies.csv';
+            a.click();
+        }
+    </script>
+</body>
+</html>
